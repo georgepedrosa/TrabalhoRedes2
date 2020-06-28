@@ -12,6 +12,12 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.net.Socket;
+import java.security.Key;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
+
 import javax.swing.*;
 
 public class Cliente extends JFrame implements ActionListener, KeyListener {
@@ -31,6 +37,11 @@ public class Cliente extends JFrame implements ActionListener, KeyListener {
 	private JTextField txtIP;
 	private JTextField txtPorta;
 	private JTextField txtNome;
+	
+	private String cpKey;
+	private String csKey;
+	
+	private String spKey;
 
 	public Cliente() throws IOException{                  
 		JLabel lblMessage = new JLabel("Verificar!");
@@ -73,17 +84,36 @@ public class Cliente extends JFrame implements ActionListener, KeyListener {
 		setVisible(true);
 		setDefaultCloseOperation(EXIT_ON_CLOSE);
 	}
+	
+	private void generateRSAKeys() {
+		try {
+			KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
+			kpg.initialize(2048);
+			KeyPair kp = kpg.generateKeyPair();
+			
+			Key pub = kp.getPublic();
+			Key pvt = kp.getPrivate();
+			
+			cpKey = Base64.getEncoder().encodeToString(pub.getEncoded());
+			csKey = Base64.getEncoder().encodeToString(pvt.getEncoded());
+		} catch (NoSuchAlgorithmException e) {
+			e.printStackTrace();
+		}
+	}
 
 	public void conectar() {
+		
+		generateRSAKeys();
 		
 		try {
 			socket = new Socket(txtIP.getText(),Integer.parseInt(txtPorta.getText()));
 			ou = socket.getOutputStream();
 			ouw = new OutputStreamWriter(ou);
 			bfw = new BufferedWriter(ouw);
-			bfw.write(txtNome.getText()+"\r\n");
+			
+			bfw.write(txtNome.getText()+"\r\n" + cpKey +"\r\n");
 			bfw.flush();
-		
+					
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -124,13 +154,19 @@ public class Cliente extends JFrame implements ActionListener, KeyListener {
 		String msg = "";
 
 		while(!"#sair".equalsIgnoreCase(msg))
-
 			if(bfr.ready()){
 				msg = bfr.readLine();
-				if(msg.equals("#sair"))
-					texto.append("Servidor caiu! \r\n");
-				else
-					texto.append(msg+"\r\n");         
+				if (msg.contains("#chave ")) {
+					String key = msg.replace("null -> #chave ", "");
+					spKey = key;
+					System.out.println(txtNome.getText() + " recebeu chave do servidor");
+					System.out.println(spKey);
+				} else {
+					if(msg.equals("#sair"))
+						texto.append("Servidor caiu! \r\n");
+					else
+						texto.append(msg+"\r\n");
+				}
 			}
 		} catch (IOException e) {
 			e.printStackTrace();
