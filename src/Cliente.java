@@ -13,11 +13,18 @@ import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.net.Socket;
 import java.security.Key;
+import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
 
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 import javax.swing.*;
 
 public class Cliente extends JFrame implements ActionListener, KeyListener {
@@ -40,6 +47,8 @@ public class Cliente extends JFrame implements ActionListener, KeyListener {
 	
 	private String cpKey;
 	private String csKey;
+	
+	private String kKey;
 	
 	private String spKey;
 
@@ -118,14 +127,22 @@ public class Cliente extends JFrame implements ActionListener, KeyListener {
 			e.printStackTrace();
 		}
 	}
+	
+	public String msgCriptografadaComKKey(String msg) throws Exception {
+		byte[] decodedKey = Base64.getDecoder().decode(kKey);
+		SecretKey secretKey = new SecretKeySpec(decodedKey, 0, decodedKey.length, "AES");
+		
+		Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey);
+        return Base64.getEncoder().encodeToString(cipher.doFinal(msg.getBytes("UTF-8")));
+	}
 
 	public void enviarMensagem(String msg) throws IOException{
-
 		if(msg.equals("#sair")){
 			bfw.write("Desconectado \r\n");
 			texto.append("Desconectado \r\n");
 			bfw.flush();
-			txtMsg.setText(""); 
+			txtMsg.setText("");
 			bfw.close();
 			ouw.close();
 			ou.close();
@@ -136,12 +153,22 @@ public class Cliente extends JFrame implements ActionListener, KeyListener {
 				txtNome.setText(newName);
 				setTitle(txtNome.getText());
 			}
-			bfw.write(msg+"\r\n");
-			texto.append( txtNome.getText() + " diz -> " + txtMsg.getText()+"\r\n");
-			bfw.flush();
-			txtMsg.setText(""); 
+			
+			try {
+				
+				if (!msg.contains("#kKey ")) {
+					msg = msgCriptografadaComKKey(msg);
+					texto.append( txtNome.getText() + " diz -> " + txtMsg.getText()+"\r\n");
+					txtMsg.setText(""); 
+				}
+			
+				bfw.write(msg+"\r\n");
+				bfw.flush();
+			
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
 		}
-
 	}
 
 	public void escutar() {
@@ -156,11 +183,34 @@ public class Cliente extends JFrame implements ActionListener, KeyListener {
 		while(!"#sair".equalsIgnoreCase(msg))
 			if(bfr.ready()){
 				msg = bfr.readLine();
-				if (msg.contains("#chave ")) {
-					String key = msg.replace("null -> #chave ", "");
-					spKey = key;
-					System.out.println(txtNome.getText() + " recebeu chave do servidor");
+				if (msg.contains("#spKey ")) {
+					spKey = msg.replace("null -> #spKey ", "");
+					System.out.println(txtNome.getText() + " recebeu spKey do servidor");
 					System.out.println(spKey);
+					try {
+						kKey = generateKKey();
+						System.out.println(txtNome.getText() + " gerou kKey");
+						System.out.println(kKey);
+						
+						byte[] decodedKey = Base64.getDecoder().decode(spKey);
+						
+						X509EncodedKeySpec spec = new X509EncodedKeySpec(decodedKey);
+						KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+						PublicKey rsaKey = keyFactory.generatePublic(spec);
+						
+						Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+			            cipher.init(Cipher.ENCRYPT_MODE, rsaKey);
+			            
+			            System.out.println(txtNome.getText() + " criptografando chave K");
+			            String encryptedKKey = Base64.getEncoder().encodeToString(cipher.doFinal(kKey.getBytes("UTF-8")));
+						
+						enviarMensagem("#kKey " + encryptedKKey);
+						System.out.println(txtNome.getText() + " enviou kKey criptografada para servidor");
+						System.out.println(encryptedKKey);
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+
 				} else {
 					if(msg.equals("#sair"))
 						texto.append("Servidor caiu! \r\n");
@@ -171,6 +221,13 @@ public class Cliente extends JFrame implements ActionListener, KeyListener {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+	}
+	
+	public String generateKKey() throws NoSuchAlgorithmException {
+		KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+		keyGen.init(256);
+		SecretKey secretKey = keyGen.generateKey();
+		return Base64.getEncoder().encodeToString(secretKey.getEncoded());
 	}
 
 	public void sair() throws IOException{

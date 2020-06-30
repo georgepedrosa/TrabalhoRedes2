@@ -12,9 +12,13 @@ import java.security.Key;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
 import java.util.ArrayList;
 import java.util.Base64;
 
+import javax.crypto.Cipher;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JTextField;
@@ -24,7 +28,10 @@ public class Servidor extends Thread {
 	private static ArrayList<BufferedWriter>clientes;           
 	private static ServerSocket server; 
 	private String nome;
-	private String chave;
+	
+	private String cpKey;
+	private String kKey;
+	
 	private Socket con;
 	private InputStream in;  
 	private InputStreamReader inr;  
@@ -32,7 +39,7 @@ public class Servidor extends Thread {
 	private static boolean sendKey = false;
 	
 	private static String spKey;
-	private static String ssKey;
+	private static PrivateKey ssKey;
 	
 	public Servidor(Socket con){
 		this.con = con;
@@ -53,12 +60,11 @@ public class Servidor extends Thread {
 			KeyPair kp = kpg.generateKeyPair();
 			
 			Key pub = kp.getPublic();
-			Key pvt = kp.getPrivate();
-			
 			spKey = Base64.getEncoder().encodeToString(pub.getEncoded());
-			ssKey = Base64.getEncoder().encodeToString(pvt.getEncoded());
+
+			ssKey = kp.getPrivate();
 			
-			System.out.println("chave do servidor gerada: ");
+			System.out.println("spKey do servidor gerada: ");
 			System.out.println(spKey);
 			
 		} catch (NoSuchAlgorithmException e) {
@@ -69,7 +75,6 @@ public class Servidor extends Thread {
 	public void run(){
 		
 		try{
-//			System.out.println("1");
 			String msg;
 			OutputStream ou =  this.con.getOutputStream();
 			Writer ouw = new OutputStreamWriter(ou);
@@ -77,32 +82,43 @@ public class Servidor extends Thread {
 			clientes.add(bfw);
 			
 			if (sendKey) {
-				msg = "#chave " + spKey;					
+				msg = "#spKey " + spKey;					
 				sendToNewClient(msg);
 				sendKey = false;
 			}
-			
-//			System.out.println("2");
-			
+						
 			nome = msg = bfr.readLine();
-			chave = bfr.readLine();
+			cpKey = bfr.readLine();
 			
-			System.out.println("Servidor recebeu chave de " + nome);
-			System.out.println(chave);
+			System.out.println("Servidor recebeu cpKey de " + nome);
+			System.out.println(cpKey);
 			
-			while(!"Sair".equalsIgnoreCase(msg) && msg != null) {    
-//				System.out.println("3");
+			while(!"#sair".equalsIgnoreCase(msg) && msg != null) {    
 				if (msg.contains("#nome ")) {
 					String newName = msg.replace("#nome ", "");
 					nome = newName;
+				} else if (msg.contains("#kKey ")) {
+					String encryptedKKey = msg.replace("#kKey ", "");
+					
+					System.out.println("Servidor recebeu chave K criptografada: " + encryptedKKey);
+					
+					byte[] decodedEncryptedKKeyKey = Base64.getDecoder().decode(encryptedKKey);
+					
+			        Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+			        cipher.init(Cipher.DECRYPT_MODE, ssKey);
+			        
+			        System.out.println("Descriptografando chave");
+					
+					kKey = new String(cipher.doFinal(decodedEncryptedKKeyKey));
+					
+					System.out.println("Servidor salvou kKey: " + kKey);
 				}
 				msg = bfr.readLine();					
 				sendToAll(bfw, msg);
 			}
 
-		}catch (Exception e) {
+		} catch (Exception e) {
 			e.printStackTrace();
-
 		}                       
 	}
 	
@@ -115,18 +131,32 @@ public class Servidor extends Thread {
 			e.printStackTrace();
 		}
 	}
+	
+	public String msgDescriptografada(String msg) throws Exception {
+		byte[] decodedKey = Base64.getDecoder().decode(kKey);
+		SecretKey secretKey = new SecretKeySpec(decodedKey, 0, decodedKey.length, "AES");
+		
+		Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5PADDING");
+        cipher.init(Cipher.DECRYPT_MODE, secretKey);
+        return new String(cipher.doFinal(Base64.getDecoder().decode(msg)));
+	}
 
 	public void sendToAll(BufferedWriter bwSaida, String msg) {
-		BufferedWriter bwS;
+		
+		if (!msg.contains("#kKey ")) {
+			System.out.println("Servidor enviando mensagem criptografa: " + msg);
 
-		for(BufferedWriter bw : clientes){
-			bwS = (BufferedWriter)bw;
-			if(!(bwSaida == bwS)){
-				try {
-				bw.write(nome + " -> " + msg+"\r\n");
-				bw.flush(); 
-				} catch (IOException e) {
-					e.printStackTrace();
+			BufferedWriter bwS;
+	
+			for(BufferedWriter bw : clientes){
+				bwS = (BufferedWriter)bw;
+				if(!(bwSaida == bwS)){
+					try {
+					bw.write(nome + " -> " + msgDescriptografada(msg) +"\r\n");
+					bw.flush(); 
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
 				}
 			}
 		}
