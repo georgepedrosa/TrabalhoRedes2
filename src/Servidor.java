@@ -15,6 +15,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
@@ -40,6 +41,8 @@ public class Servidor extends Thread {
 	
 	private static String spKey;
 	private static PrivateKey ssKey;
+	
+	private static List<String> kKeys = new ArrayList<String>();
 	
 	public Servidor(Socket con){
 		this.con = con;
@@ -107,11 +110,12 @@ public class Servidor extends Thread {
 			        Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
 			        cipher.init(Cipher.DECRYPT_MODE, ssKey);
 			        
-			        System.out.println("Descriptografando chave");
+			        System.out.println("Descriptografando chave K");
 					
-					kKey = new String(cipher.doFinal(decodedEncryptedKKeyKey));
+			        kKey = new String(cipher.doFinal(decodedEncryptedKKeyKey));
+					kKeys.add(new String(cipher.doFinal(decodedEncryptedKKeyKey))); 
 					
-					System.out.println("Servidor salvou kKey: " + kKey);
+					System.out.println("Servidor salvou kKey: " + kKeys.get(kKeys.size()-1));
 				}
 				msg = bfr.readLine();					
 				sendToAll(bfw, msg);
@@ -140,20 +144,40 @@ public class Servidor extends Thread {
         cipher.init(Cipher.DECRYPT_MODE, secretKey);
         return new String(cipher.doFinal(Base64.getDecoder().decode(msg)));
 	}
+	
+	public String msgCriptografadaComKKeyDoCliente(String msg, int index) throws Exception {		
+		byte[] decodedKey = Base64.getDecoder().decode(kKeys.get(index));
+		SecretKey secretKey = new SecretKeySpec(decodedKey, 0, decodedKey.length, "AES");
+		
+		Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey);
+        return Base64.getEncoder().encodeToString(cipher.doFinal(msg.getBytes("UTF-8")));
+	}
 
 	public void sendToAll(BufferedWriter bwSaida, String msg) {
+		String msgDescriptografada = msg;
+		
+		if (kKey != null) {
+			try {
+				msgDescriptografada = msgDescriptografada(msg);
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
 		
 		if (!msg.contains("#kKey ")) {
-			System.out.println("Servidor enviando mensagem criptografa: " + msg);
-
 			BufferedWriter bwS;
 	
-			for(BufferedWriter bw : clientes){
+			for(int i=0; i<clientes.size();i++) {
+				BufferedWriter bw = clientes.get(i);
 				bwS = (BufferedWriter)bw;
 				if(!(bwSaida == bwS)){
 					try {
-					bw.write(nome + " -> " + msgDescriptografada(msg) +"\r\n");
-					bw.flush(); 
+						String line = nome + " -> " + msgDescriptografada;
+						String mensagemCriptografada = msgCriptografadaComKKeyDoCliente(line, i);
+						System.out.println("Mensagem criptografada enviada pelo servidor: " + mensagemCriptografada);
+						bw.write(mensagemCriptografada + "\r\n");
+						bw.flush(); 
 					} catch (Exception e) {
 						e.printStackTrace();
 					}

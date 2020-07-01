@@ -170,6 +170,22 @@ public class Cliente extends JFrame implements ActionListener, KeyListener {
 			}
 		}
 	}
+	
+	public String msgDescriptografada(String msg) throws Exception {
+		if (kKey != null) {
+			System.out.println("Cliente transformou a mensagem criptografada " +msg);
+			byte[] decodedKey = Base64.getDecoder().decode(kKey);
+			SecretKey secretKey = new SecretKeySpec(decodedKey, 0, decodedKey.length, "AES");
+			
+			Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5PADDING");
+		    cipher.init(Cipher.DECRYPT_MODE, secretKey);
+		    String mensagemDescriptografada = new String(cipher.doFinal(Base64.getDecoder().decode(msg)));
+			System.out.println("em mensagem descriptografada: " + mensagemDescriptografada);
+		    return mensagemDescriptografada;
+		} else {
+			return msg;
+		}
+}
 
 	public void escutar() {
 		
@@ -182,7 +198,11 @@ public class Cliente extends JFrame implements ActionListener, KeyListener {
 
 		while(!"#sair".equalsIgnoreCase(msg))
 			if(bfr.ready()){
-				msg = bfr.readLine();
+				try {
+					msg = msgDescriptografada(bfr.readLine());
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
 				if (msg.contains("#spKey ")) {
 					spKey = msg.replace("null -> #spKey ", "");
 					System.out.println(txtNome.getText() + " recebeu spKey do servidor");
